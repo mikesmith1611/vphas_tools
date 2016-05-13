@@ -25,63 +25,6 @@ wd = '/car-data/msmith/tools/calib/'
 stilts = 'java -jar /home/msmith/bin/topcat/topcat-*.jar -stilts'
 
 
-def download(fieldname):
-    """
-
-    :param fieldname:
-    """
-
-    filenames = glob.glob('/car-data/egaps/greimel/VPHAS/merge/*')
-    prefix = ''
-
-    x = fnmatch.filter(filenames, '*vphas_' + fieldname + '*')
-
-    blu = fnmatch.filter(x, '*blu*')
-
-    red = fnmatch.filter(x, '*red*')
-
-    if len(blu) > 1:
-
-        dates = np.array([int(blu[i].split(fieldname)[-1].split('-')[1])
-                          for i, j in enumerate(blu)])
-
-        blu_file = prefix + blu[dates.argmax()]
-        os.system('rsync -avuhP ' + blu_file + ' ' +
-                  field_loc + 'allfields/' +
-                  blu_file.split('/')[-1])
-
-    elif len(blu) == 1:
-
-        blu_file = prefix + blu[0]
-
-        os.system('rsync -avuhP ' + blu_file + ' ' +
-                  field_loc + 'allfields/' +
-                  blu_file.split('/')[-1])
-
-    else:
-        print 'file does not exist'
-
-    if len(red) > 1:
-
-        dates = np.array([int(red[i].split(fieldname)[-1].split('-')[1])
-                          for i, j in enumerate(red)])
-
-        red_file = prefix + red[dates.argmax()]
-
-        os.system('rsync -avuhP ' + red_file + ' ' +
-                  field_loc + 'allfields/' +
-                  red_file.split('/')[-1])
-
-    elif len(red) == 1:
-
-        red_file = prefix + red[0]
-        os.system('rsync -avuhP ' + red_file + ' ' +
-                  field_loc + 'allfields/' +
-                  red_file.split('/')[-1])
-    else:
-        print 'file does not exist'
-
-
 def density_plot(data, cx, cy, cxshift, cyshift, ax, bins):
 
     mx = []
