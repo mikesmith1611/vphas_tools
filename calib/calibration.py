@@ -24,7 +24,7 @@ field_loc = '/car-data/msmith/fields/'
 wd = '/car-data/msmith/tools/calib/'
 stilts = 'java -jar /home/msmith/bin/topcat/topcat-*.jar -stilts'
 
-
+'test'
 def density_plot(data, cx, cy, cxshift, cyshift, ax, bins):
 
     mx = []
