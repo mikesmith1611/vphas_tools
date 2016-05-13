@@ -22,11 +22,16 @@ rc('font', **{'family': 'serif', 'serif': ['Computer Modern']})
 
 # Location of where to store the merged VPHAS+ data
 field_loc = '/car-data/msmith/fields/'
+# Location of where this file is stored
 wd = '/car-data/msmith/tools/calib/'
+# STILTS installation
 stilts = 'java -jar /home/msmith/bin/topcat/topcat-*.jar -stilts'
+# Location of APASS DR9 fits file
+apass_loc = '../models/apass/apass-dr9-plane-vphas.fits'
 
-
+'cheese'
 def density_plot(data, cx, cy, cxshift, cyshift, ax, bins):
+    # Creates a density plot in colour colour space
 
     mx = []
     my = []
@@ -138,14 +143,12 @@ def density_plot(data, cx, cy, cxshift, cyshift, ax, bins):
                       top='off', bottom='off',
                       labeltop=True, labelbottom=False)
     cb.ax.set_xticklabels(labels, fontsize=8)
-    #cb.ax.get_xticklabels()[0].set_horizontalalignment('left')
-    #cb.ax.get_xticklabels()[-1].set_horizontalalignment('right')
-    # cb.ax.set_xticks([], visible=False)
-    # cb.ax.set_xticklabels([], visible=False)
 
     return ax
 
+
 def getmodelcolours(**kwargs):
+    # Retrieves synthetic colours for VPHAS+ stars
 
     d = {'R_V': 3.1, 'ms': False, 'A0': 0, 'spectype': 'G0_V'}
 
@@ -168,7 +171,7 @@ def getmodelcolours(**kwargs):
 
 def calib_polygon():
     """
-    :return:
+    Creates the 'triangle' polygon needed to calibrate the 'u' band
     """
     G0model = getmodelcolours(spectype=['G0_V'], R_V=3.1)
     mask = (G0model['A0'] < 2.7)
@@ -195,7 +198,7 @@ bbPath = calib_polygon()
 def crossmatch(in1, in2, out, **kwargs):
     """
     ====================================================================
-    crossmatch - joins red and blu VPHAS+ tables
+    crossmatch - joins red and blu VPHAS+ tables using STILTS
     ====================================================================
     Variables
 
@@ -291,12 +294,8 @@ class vphas_field:
         else:
             print 'file does not exist'
 
-        download(self.field)
-
         files = glob.glob(field_loc + 'allfields/vphas_' +
                           self.field + '-*.fits')
-
-        print len(files)
 
         if len(files) == 2:
 
@@ -403,8 +402,7 @@ class vphas_field:
                    self.field + '-apass.fits')
 
         if not os.path.exists(outfile):
-            crossmatch(vphas_file, '../models/apass/' +
-                       'apass-dr9-plane-vphas.fits',
+            crossmatch(vphas_file, apass_loc,
                        outfile, join='1and2')
 
         data = Table.read(outfile)
