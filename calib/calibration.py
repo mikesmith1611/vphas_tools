@@ -29,7 +29,7 @@ stilts = 'java -jar /home/msmith/bin/topcat/topcat-*.jar -stilts'
 # Location of APASS DR9 fits file
 apass_loc = '../models/apass/apass-dr9-plane-vphas.fits'
 
-'cheese'
+
 def density_plot(data, cx, cy, cxshift, cyshift, ax, bins):
     # Creates a density plot in colour colour space
 
