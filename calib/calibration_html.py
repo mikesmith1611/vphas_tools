@@ -2,6 +2,8 @@ import numpy as np
 from astropy.table import Table
 import os
 
+reference = 'apass'
+
 def create_template_html():
     html_str = """
 <html>
@@ -16,7 +18,7 @@ def create_template_html():
 <body>
 
 <h1> VPHAS+ calibration shifts</h1>
-<a href="tool/calib/tables/shifts_all.fits">Full Table (fits)</a> &nbsp;&nbsp;&nbsp;&nbsp;
+<a href="tools/calib/tables/apass/shifts_apass_all.fits">Full Table (fits)</a> &nbsp;&nbsp;&nbsp;&nbsp;
 
 <br> <br>
 
@@ -41,7 +43,7 @@ def create_template_html():
 
 </tr>
         """
-    html_file = open('/home/msmith/public_html/vphasshifts.html', 'w')
+    html_file = open('/home/msmith/public_html/vphasshifts_{0}.html'.format(reference), 'w')
     html_file.write(html_str)
     html_file.close()
 
@@ -51,8 +53,8 @@ def add_row(field, data, i, makethumb=False, make_html_image=True):
     data2 = data
     data = data[mask]
 
-    paramimage = 'tools/calib/plots/vphas_' + field + '.png'
-    concat_img = 'tools/calib/plots/vphas_' + field + '_concat_calib.png'
+    paramimage = 'tools/calib/plots/{0}/vphas_{1}_{0}.png'.format(reference, field)
+    concat_img = 'tools/calib/plots/{0}/vphas_{1}_concat_calib.png'.format(reference, field)
     paramimagesm = paramimage[:-4] + '_s.png'
 
     if make_html_image:
@@ -105,7 +107,7 @@ def add_row(field, data, i, makethumb=False, make_html_image=True):
     html_str += r'<td><a href="' + concat_img + '" target="_blank">Concat plots</a>' + '\n'
     html_str += r'</tr>' + '\n'
 
-    html_file = open('/home/msmith/public_html/vphasshifts.html', 'a')
+    html_file = open('/home/msmith/public_html/vphasshifts_{0}.html'.format(reference), 'a')
     html_file.write(html_str)
     html_file.close()
 
@@ -117,7 +119,7 @@ def end_html():
                 </body>
                 </html> \n
             """
-    html_file = open('/home/msmith/public_html/vphasshifts.html', 'a')
+    html_file = open('/home/msmith/public_html/vphasshifts_{0}.html'.format(reference), 'a')
     html_file.write(html_str)
     html_file.close()
 
@@ -139,32 +141,32 @@ return true;
 <body>
 """
     image2 = image
-    html_str += '<embed src="../' + image2 + '" style="float: left; width: 60%;" />'
-    html_str += '<embed src="../tools/calib/plots/spatial_map_{0}.png"'.format(data['field'][i])
+    html_str += '<embed src="../../' + image2 + '" style="float: left; width: 60%;" />'
+    html_str += '<embed src="../../tools/calib/plots/{1}/spatial_map_{0}.png"'.format(data['field'][i], reference)
     html_str += ' style="float: left; width: 40%;" /> \n'
     html_str += '<p style="clear: both;">'
     html_str += '<br><p align="center"> '
     if i == 0:
-        html_str += ('<a href="vphas_' + data['field'][-1] +
+        html_str += ('<a href="vphas_' + data['field'][-1] + '_' + reference +
                      '.html' + '">Previous | </a> ')
 
-        html_str += ('<a href="vphas_' + data['field'][i + 1] +
+        html_str += ('<a href="vphas_' + data['field'][i + 1] + '_' + reference +
                      '.html' + '">Next</a>')
 
     elif i != len(data) - 1:
 
-        html_str += ('<a href="vphas_' + data['field'][i - 1] +
+        html_str += ('<a href="vphas_' + data['field'][i - 1] + '_' + reference +
                      '.html' + '">Previous | </a> ')
 
-        html_str += ('<a href="vphas_' + data['field'][i + 1] +
+        html_str += ('<a href="vphas_' + data['field'][i + 1] + '_' + reference +
                      '.html' + '">Next</a>')
 
     else:
 
-        html_str += ('<a href="vphas_' + data['field'][i - 1] +
+        html_str += ('<a href="vphas_' + data['field'][i - 1] + '_' + reference +
                      '.html' + '">Previous | </a> ')
 
-        html_str += ('<a href="vphas_' + data['field'][0] +
+        html_str += ('<a href="vphas_' + data['field'][0] + '_' + reference +
                      '.html' + '">Next</a>')
 
     html_str += '</p>'
@@ -176,11 +178,11 @@ return true;
 
     html_str += "</body> \n </html>"
     img = image.split('/')[-1].split('.')[0]
-    html_fname = '/home/msmith/public_html/calibplots/' + img + '.html'
+    html_fname = '/home/msmith/public_html/calibplots/{0}/'.format(reference) + img + '.html'
     html_file = open(html_fname, 'w')
     html_file.write(html_str)
     html_file.close()
-    return 'calibplots/' + img + '.html'
+    return 'calibplots/{0}/'.format(reference) + img + '.html'
 
 def make_image_html2(i, image, data):
     html_str = "<html> \n <head> \n"
@@ -199,7 +201,7 @@ return true;
 <body>
 """
     image2 = image
-    html_str += '<div style="float:left;"><embed src="../' + image2 + '" height="90%"/> \n'
+    html_str += '<div style="float:left;"><embed src="../../' + image2 + '" height="90%"/> \n'
     html_str +=  '<div style="float:right;"><table style="width:50%" border="1"> \n <tr>'
     html_str += '<th>u</td> \n'
     html_str += '<th>g</td> \n'
@@ -242,14 +244,13 @@ return true;
     html_str += '<form action="save.php?field=' + data['field'][i] +'" method="post" onSubmit="return sayHello()">'
     html_str += '<input  class="btn" type="submit" Value="Flag !" align="right">'
     html_str += '</form>'
-    
     html_str += "</body> \n </html>"
     img = image.split('/')[-1].split('.')[0]
-    html_fname = '/home/msmith/public_html/calibplots/' + img + '.html'
+    html_fname = '/home/msmith/public_html/calibplots/{0}/'.format(reference) + img + '.html'
     html_file = open(html_fname, 'w')
     html_file.write(html_str)
     html_file.close()
-    return 'calibplots/' + img + '.html'
+    return 'calibplots/{0}/'.format(reference) + img + '.html'
 
 
 create_template_html()
@@ -258,7 +259,7 @@ for i, j in enumerate(data['ID']):
     os.system('mv ' + '../data/OBstars/good/' + j.strip() + '*.png ' +
               '../data/OBstars/emission/')
 """
-data = Table.read('tables/shifts_all.fits')
+data = Table.read('tables/{0}/shifts_{0}_all.fits'.format(reference))
 data.sort('field')
 for i, f in enumerate(data['field']):
     add_row(f, data, i, makethumb=False, make_html_image=True)

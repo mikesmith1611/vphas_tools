@@ -28,6 +28,15 @@ wd = '/car-data/msmith/tools/calib/'
 stilts = 'java -jar /home/msmith/bin/topcat/topcat-*.jar -stilts'
 # Location of APASS DR9 fits file
 apass_loc = '../models/apass/apass-dr9-plane-vphas.fits'
+# Location of PanSTARRS fits file
+panstarrs_loc = '../models/panstarrs/panstarrs_plane.fits'
+
+# External refence column headings must be gmag, rmag, imag and in AB mag sys
+# Converted to Vega mag in vphas_field class
+
+reference = 'panstarrs'
+
+reference_loc = panstarrs_loc
 
 
 def density_plot(data, cx, cy, cxshift, cyshift, ax, bins):
@@ -134,7 +143,7 @@ def density_plot(data, cx, cy, cxshift, cyshift, ax, bins):
         c = r'$' + a + r'\times 10^{' + b[1] + '}$'
         labels.append(c)
 
-    labels = ["{0}".format(int(x)) for x in levels]
+    labels = ["{0}".format(int(l)) for l in levels]
     # cbax = cb.ax.twiny()
     cb.ax.set_xlabel("Density ($N_{Stars}/0.01$ mag$^2$)", fontsize=8,
                      labelpad=-28)
@@ -232,21 +241,33 @@ def crossmatch(in1, in2, out, **kwargs):
 
 
 class vphas_field:
-    def __init__(self, field):
+    def __init__(self, field, globalcalibrate=False):
 
         self.field = field
         self.a2v = {'r1': 'rmag', 'r2': 'rmag', 'g': 'gmag', 'i': 'imag'}
-        self.lims = {'r1': (13.5, 16.), 'r2': (13.5, 16.),
-                     'g': (14, 16.), 'i': (13.5, 15.),
-                     'u': (13, 20)}
+        if reference == 'apass':
+            self.lims = {'r1': (13.5, 16.), 'r2': (13.5, 16.),
+                         'g': (14, 16.), 'i': (13.5, 15.),
+                         'u': (13, 20)}
+        elif reference == 'panstarrs':
+            self.lims = {'r1': (16.5, 19.), 'r2': (16.5, 19.5),
+                         'g': (17.5, 20.5), 'i': (15.5, 18.5),
+                         'u': (13, 20)}
         self.ab_to_vega = {'r1': -0.136, 'r2': -0.136, 'g': 0.123, 'i': -0.373}
         self.bbPath = bbPath
+        self.shifts = {'r1': [], 'r2': [], 'g': [], 'i': [], 'u': []}
+        self.sigmas = {'r1': [], 'r2': [], 'g': [], 'i': []}
+        self.globalcalibrate = globalcalibrate
 
     def download(self):
 
         filenames = glob.glob('/car-data/egaps/greimel/VPHAS/merge/*')
         prefix = ''
-
+        vfile = (field_loc + 'allfieldsxmatched/vphas_' +
+                 self.field + '.fits')
+        if os.path.exists(vfile):
+            return True
+        print '\nDownloading files...\n'
         x = fnmatch.filter(filenames, '*vphas_' + self.field + '*')
 
         blu = fnmatch.filter(x, '*blu*')
@@ -332,17 +353,14 @@ class vphas_field:
 
             red_data.write(red, overwrite=True)
 
-            file = (field_loc + 'allfieldsxmatched/vphas_' +
-                    self.field + '.fits')
+            crossmatch(blu, red, vfile)
 
-            crossmatch(blu, red, file)
-
-            os.system(stilts + ' tpipe in=' + str(file) +
+            os.system(stilts + ' tpipe in=' + str(vfile) +
                       ' cmd=' + "'addcol" + ' RA ' +
                       '"NULL_RA_1 ? RA_2:RA_1"' + "'" +
                       ' cmd=' + "'addcol" + ' DEC ' +
                       '"NULL_DEC_1 ? DEC_2:DEC_1"' + "'" +
-                      ' out=' + str(file) + ' ofmt=fits')
+                      ' out=' + str(vfile) + ' ofmt=fits')
 
             for fi in files:
                 os.system('rm ' + fi)
@@ -376,7 +394,7 @@ class vphas_field:
                 mfc='#888888', mec='#888888', marker='.',
                 linestyle='None')
 
-        ax.hlines(shift, self.lims[magstring][0], self.lims[magstring][1],
+        ax.hlines(-shift, self.lims[magstring][0], self.lims[magstring][1],
                   linestyles='dashed', zorder=4)
 
         ax.set_xlim(self.lims[magstring][0], self.lims[magstring][1])
@@ -386,66 +404,76 @@ class vphas_field:
         ax.set_xlabel(r'$' + magstring + r'$')
 
         ax.set_ylabel(r'$' + magstring +
-                      r'(VPHAS+) - ' + magstring + r'(APASS)$')
+                      r'(VPHAS+) - ' + magstring +
+                      r'({0})$'.format(reference.upper()))
 
-    def apass_calibrate(self,
-                        recalibrate={'r1': False, 'r2': False,
-                                     'g': False, 'i': False, 'u': False}):
+    def external_calibrate(self):
 
-        if np.any(recalibrate.values()):
-            shift_data = Table.read('tables/shifts_all.fits')
+        if self.globalcalibrate:
+            s_data = Table.read('tables/shifts_{0}_all.fits'.format(reference))
 
         vphas_file = (field_loc + 'allfieldsxmatched/vphas_' +
                       self.field + '.fits')
 
-        outfile = (wd + 'tables/vphas_' +
-                   self.field + '-apass.fits')
+        outfile = (wd + 'tables/{0}/vphas_' +
+                   self.field + '-{0}.fits')
+        outfile = outfile.format(reference)
 
         if not os.path.exists(outfile):
-            crossmatch(vphas_file, apass_loc,
+            crossmatch(vphas_file, reference_loc,
                        outfile, join='1and2')
 
         data = Table.read(outfile)
-        vdata = Table.read(vphas_file)
 
-        shifts = {'r1': [], 'r2': [], 'g': [], 'i': [], 'u': []}
-        sigmas = {'r1': [], 'r2': [], 'g': [], 'i': []}
-        subplots = {'r1': (1, 0), 'r2': (1, 1), 'g': (2, 0), 'i': (2, 1),
-                    'u_g_b': (0, 2), 'u_g': (0, 3), 'r_ha_b': (1, 2),
-                    'r_ha': (1, 3), 'r_i_b': (2, 2), 'r_i': (2, 3)}
+        self.subplots = {'r1': (1, 0), 'r2': (1, 1), 'g': (2, 0), 'i': (2, 1),
+                         'u_g_b': (0, 2), 'u_g': (0, 3), 'r_ha_b': (1, 2),
+                         'r_ha': (1, 3), 'r_i_b': (2, 2), 'r_i': (2, 3)}
 
         for i in ['1', '2']:
-            fig = plt.figure(figsize=(16, 12))
+            self.fig = plt.figure(figsize=(16, 12))
 
             for b in self.a2v.keys():
 
-                d = self.apass_clean(data, b, i)
+                if reference == 'apass':
+                    d = self.apass_clean(data, b, i)
+                else:
+                    d = data
 
                 delta = d[b + '_' + i] - (d[self.a2v[b]] + self.ab_to_vega[b])
 
-                mask_delta = (np.abs(delta - np.median(delta)) >
-                              (2 * np.std(delta)))
+                mask_delta = (np.abs(delta - np.nanmedian(delta)) >
+                              (2 * np.nanstd(delta)))
 
-                ax = plt.subplot2grid((3, 4), subplots[b])
+                ax = plt.subplot2grid((3, 4), self.subplots[b])
 
                 if len(mask_delta[mask_delta]) != 0:
-                    shift = np.median(delta[-mask_delta])
-                    self.plot_apass(ax, d[-mask_delta],
-                                    delta[-mask_delta], b + '_' + i, shift)
+                    shift = -np.nanmedian(delta[~mask_delta])
+                    self.plot_apass(ax, d[~mask_delta],
+                                    delta[~mask_delta], b + '_' + i, shift)
                 else:
-                    shift = np.median(delta)
+                    shift = -np.nanmedian(delta)
                     self.plot_apass(ax, d,
                                     delta, b + '_' + i, shift)
 
-                if recalibrate[b]:
-                    shift = np.median(shift_data[b])
+                if self.globalcalibrate:
+                    mask = s_data['field'] == self.field + '_' + i
+                    shift = shift[mask][b]
                     lim = ax.get_xlim()
                     ax.hlines(shift, lim[0], lim[1], color='r',
                               linestyles='dashed', zorder=4)
 
-                shifts[b].append(-shift)
-                sigmas[b].append(np.std(delta))
+                self.shifts[b].append(shift)
+                self.sigmas[b].append(np.nanstd(delta))
 
+    def u_band_calibrate(self):
+        vphas_file = (field_loc + 'allfieldsxmatched/vphas_' +
+                      self.field + '.fits')
+        vdata = Table.read(vphas_file)
+        outfile = (wd + 'tables/{0}/vphas_' +
+                   self.field + '-{0}.fits')
+        outfile = outfile.format(reference)
+
+        for i in ['1', '2']:
             ub = 'u' + '_' + i
 
             mask1 = vdata['err_' + ub] < 0.1
@@ -454,9 +482,9 @@ class vphas_field:
 
             vdatau = vdata[mask1 & mask2 & mask3]
 
-            g = vdatau['g' + '_' + i] + shifts['g'][int(i) - 1]
+            g = vdatau['g' + '_' + i] + self.shifts['g'][int(i) - 1]
 
-            r = vdatau['r2' + '_' + i] + shifts['r2'][int(i) - 1]
+            r = vdatau['r2' + '_' + i] + self.shifts['r2'][int(i) - 1]
 
             u = vdatau[ub]
 
@@ -492,11 +520,10 @@ class vphas_field:
             xmax, ymax = [xarr[mask1], yarr[mask1]]
             mask2 = bbPath.contains_points(zip(xmax, ymax))
             n_in = len(mask2[mask2])
-            n_out = len(mask2[-mask2])
+            n_out = len(mask2[~mask2])
 
             if n_out > n_in:
                 print 'u band additional shift'
-                recalibrate['u'] = True
                 model_GOV = getmodelcolours(spectype=['G0_V'], R_V=3.1)
                 mask = np.argsort(model_GOV['g'] - model_GOV['r'])
                 GOV_gr = model_GOV['g'] - model_GOV['r']
@@ -505,7 +532,7 @@ class vphas_field:
 
                 def obj_count(unewshift):
                     mask = (ymax + unewshift < np.lib.polyval(z, xmax))
-                    return abs(len(mask[mask]) - len(mask[-mask]))
+                    return abs(len(mask[mask]) - len(mask[~mask]))
 
                 its = []
                 uranges = np.arange(-0.2, 0.21, 0.01)
@@ -515,15 +542,34 @@ class vphas_field:
 
                 shift_best += unewshift
 
-            shifts['u'].append(shift_best)
+            self.shifts['u'].append(shift_best)
+
+        np.save(outfile[:-5] + '-shifts.npy', np.array([self.shifts]))
+        np.save(outfile[:-5] + '-sigmas.npy', np.array([self.sigmas]))
+        return self.shifts
+
+    def plot_cc_shifts(self):
+        vphas_file = (field_loc + 'allfieldsxmatched/vphas_' +
+                      self.field + '.fits')
+        vdata = Table.read(vphas_file)
+
+        for i in ['1', '2']:
+            ub = 'u' + '_' + i
+            mask1 = vdata['err_' + ub] < 0.1
+            mask2 = vdata[ub] > self.lims['u'][0]
+            mask3 = vdata[ub] < self.lims['u'][1]
+
+            vdatau = vdata[mask1 & mask2 & mask3]
 
             for k in ['u_g_b', 'u_g']:
 
-                ax = plt.subplot2grid((3, 4), subplots[k])
+                ax = plt.subplot2grid((3, 4), self.subplots[k])
 
                 if k.endswith('g'):
-                    s1 = shifts['g'][int(i) - 1] - shifts['r2'][int(i) - 1]
-                    s2 = shifts['u'][int(i) - 1] - shifts['g'][int(i) - 1]
+                    s1 = (self.shifts['g'][int(i) - 1] -
+                          self.shifts['r2'][int(i) - 1])
+                    s2 = (self.shifts['u'][int(i) - 1] -
+                          self.shifts['g'][int(i) - 1])
 
                 else:
                     s1 = 0
@@ -556,10 +602,11 @@ class vphas_field:
             vdataha = vdata[mask1 & mask2]
 
             for k in ['r_ha_b', 'r_ha']:
-                ax = plt.subplot2grid((3, 4), subplots[k])
+                ax = plt.subplot2grid((3, 4), self.subplots[k])
 
                 if k.endswith('ha'):
-                    s1 = shifts['r1'][int(i) - 1] - shifts['i'][int(i) - 1]
+                    s1 = (self.shifts['r1'][int(i) - 1] -
+                          self.shifts['i'][int(i) - 1])
                 else:
                     s1 = 0
 
@@ -578,11 +625,13 @@ class vphas_field:
                 ax.set_ylabel(r'$r-ha$', fontsize=16)
 
             for k in ['r_i_b', 'r_i']:
-                ax = plt.subplot2grid((3, 4), subplots[k])
+                ax = plt.subplot2grid((3, 4), self.subplots[k])
 
                 if k.endswith('i'):
-                    s1 = shifts['r1'][int(i) - 1] - shifts['i'][int(i) - 1]
-                    s2 = shifts['g'][int(i) - 1] - shifts['r2'][int(i) - 1]
+                    s1 = (self.shifts['r1'][int(i) - 1] -
+                          self.shifts['i'][int(i) - 1])
+                    s2 = (self.shifts['g'][int(i) - 1] -
+                          self.shifts['r2'][int(i) - 1])
                 else:
                     s1 = 0
                     s2 = 0
@@ -604,16 +653,13 @@ class vphas_field:
             txt = []
             cols = ['u', 'g', 'r1', 'r2', 'i']
             for s in cols:
-                t = '{0:.2f}'.format(shifts[s][int(i) - 1])
+                t = '{0:.2f}'.format(self.shifts[s][int(i) - 1])
                 txt.append(t)
 
             ax = plt.subplot2grid((3, 4), (0, 0), colspan=2)
             ytable = ax.table(cellText=[txt], colLabels=cols,
                               loc='center', cellLoc='center', fontsize=20)
 
-            for f, s in enumerate(cols):
-                if recalibrate[s]:
-                    ytable._cells[1, f]._text.set_color('r')
             ytable.scale(1, 4)
             ax.xaxis.set_visible(False)
             ax.yaxis.set_visible(False)
@@ -621,21 +667,74 @@ class vphas_field:
             plt.subplots_adjust(top=0.92, bottom=0.05)
             ax.text(0.45, 0.8, r'\underline{Shifts}',
                     ha='center', va='center', fontsize=20)
-            fig.text(0.25, 0.65, r'\underline{APASS Comparsion}',
-                     ha='center', va='center', fontsize=20)
-            fig.text(0.65, 0.97, r'\underline{Before Calibration}',
-                     ha='center', va='center', fontsize=20)
-            fig.text(0.89, 0.97, r'\underline{After Calibration}',
-                     ha='center', va='center', fontsize=20)
+            self.fig.text(0.25, 0.65, r'\underline{APASS Comparsion}',
+                          ha='center', va='center', fontsize=20)
+            self.fig.text(0.65, 0.97, r'\underline{Before Calibration}',
+                          ha='center', va='center', fontsize=20)
+            self.fig.text(0.89, 0.97, r'\underline{After Calibration}',
+                          ha='center', va='center', fontsize=20)
 
-            plt.savefig(wd + 'plots/vphas_' +
-                        self.field + '_' + i + '.png', dpi=100)
+            figname = (wd + 'plots/{0}/vphas_' + self.field + '_' + i +
+                       '_{0}.png')
+            plt.savefig(figname.format(reference), dpi=100)
 
             plt.close()
 
-        np.save(outfile[:-5] + '-shifts.npy', np.array([shifts]))
-        np.save(outfile[:-5] + '-sigmas.npy', np.array([sigmas]))
-        return shifts
+    def spatial_map_field(self):
+        field = self.field
+        a2v = self.a2v
+        ab_to_vega = self.ab_to_vega
+        lims = self.lims
+        f = 'tables/{1}/vphas_{0}-{1}.fits'.format(field, reference)
+
+        data = Table.read(f)
+        for offset in ['1', '2']:
+            it = 0
+            plt.figure(figsize=(12, 10))
+            for band in ['r1', 'r2', 'g', 'i']:
+                col = band + '_' + offset
+                er = 'err_' + col
+                mask1 = ((data[col] == data[col]) &
+                         (data[a2v[band]] == data[a2v[band]]))
+
+                mask2 = ((data[col] > lims[band][0]) &
+                         (data[col] < lims[band][1]) &
+                         (data[er] < 0.1) & (data[a2v[band]] < 99))
+                mask = mask1 & mask2
+                d = data[mask]
+                delta = (d[band + '_' + offset] -
+                         (d[a2v[band]] + ab_to_vega[band]))
+
+                mask_delta = (np.abs(delta - np.median(delta)) >
+                              (2 * np.std(delta)))
+                ax = plt.subplot(221 + it)
+                it += 1
+                if len(mask_delta[mask_delta]) != 0:
+                    a = ax.scatter(d['RA_' + offset][~mask_delta],
+                                   d['Dec_' + offset][~mask_delta],
+                                   c=delta[~mask_delta],
+                                   edgecolor='None', s=25, cmap='jet')
+                else:
+                    a = ax.scatter(d['RA_' + offset],
+                                   d['Dec_' + offset], c=delta,
+                                   edgecolor='None', s=25, cmap='jet')
+                ax.set_xlabel('RA')
+                ax.set_ylabel('DEC')
+                cb = plt.colorbar(a)
+                cb.set_label(r'$\delta {0}$'.format(band), size=18)
+                cb.solids.set_edgecolor("face")
+
+            plt.tight_layout()
+            plt.subplots_adjust(top=0.92, bottom=0.05)
+            print 'Saving...'
+            plt.suptitle(r'\underline{' + reference.upper() +
+                         'Comparison Spatial Map}',
+                         fontsize=20)
+            plt.savefig('plots/{2}/spatial_map_{0}_{1}.png'.format(field,
+                                                                   offset,
+                                                                   reference),
+                        bbox_inches='tight', rasterized=True)
+            plt.close()
 
     def sort(self):
 
@@ -665,7 +764,8 @@ class vphas_field:
 
         bands = ['Ha', 'r1', 'r2', 'g', 'i', 'u']
 
-        shifts = Table.read(wd + 'tables/shifts_all.fits')
+        shifts = Table.read(wd +
+                            'tables/shifts_all_{0}.fits'.format(reference))
 
         for band in bands:
 
@@ -724,9 +824,12 @@ def cc_plots(field):
     for j in ['1', '2']:
         mask = shiftsa['field'] == field + '_' + j
         shifts = shiftsa[mask]
-        mask2 = (datain['Av_conf_Ha_' + j] > 95.) & (datain['err_Ha_' + j] < 0.1)
-        mask1 = (datain['u_' + j] > 13) & (datain['u_' + j] < 20) & (datain['err_u_' + j] < 0.1)
-        mask3 = (datain['g_' + j] > 13) & (datain['g_' + j] < 20) & (datain['err_g_' + j] < 0.1)
+        mask2 = ((datain['Av_conf_Ha_' + j] > 95.) &
+                 (datain['err_Ha_' + j] < 0.1))
+        mask1 = ((datain['u_' + j] > 13) & (datain['u_' + j] < 20) &
+                 (datain['err_u_' + j] < 0.1))
+        mask3 = ((datain['g_' + j] > 13) & (datain['g_' + j] < 20) &
+                 (datain['err_g_' + j] < 0.1))
         masks = [mask1, mask2, mask3]
         plt.figure(figsize=(8, 12))
         for i in range(len(cx)):
@@ -1017,8 +1120,8 @@ def sort(infile, outfile):
 
 def makeshifttable(median=False, concat=False):
     print '\nCompiling Shift Table...\n'
-    files = glob.glob(wd + 'tables/*shifts.npy')
-    files2 = glob.glob(wd + 'tables/*sigmas.npy')
+    files = glob.glob(wd + 'tables/{0}/*shifts.npy'.format(reference))
+    files2 = glob.glob(wd + 'tables/{0}/*sigmas.npy'.format(reference))
     concats = []
     offsets = []
     u = []
@@ -1098,7 +1201,7 @@ def makeshifttable(median=False, concat=False):
                 l[mask] = np.median(l[mask][mask2])
             else:
                 l[mask][mask2] = np.median(l[mask][mask2])
-                l[mask][-mask2] = np.median(l[mask][-mask2])
+                l[mask][~mask2] = np.median(l[mask][~mask2])
 
     for fi in files:
         mask = concat_data['Field'] == fi.split('/')[-1].split('-')[0]
@@ -1117,9 +1220,6 @@ def makeshifttable(median=False, concat=False):
     for fi in files2:
         shifts = np.load(fi)[0]
         for o in [0, 1]:
-            # concats.append(concat_data['GroupID'][mask][0])
-            # offsets.append(field + '_' + str(o + 1))
-            #u_s.append(shifts['u'][o])
             g_s.append(shifts['g'][o])
             r1_s.append(shifts['r1'][o])
             r2_s.append(shifts['r2'][o])
@@ -1132,64 +1232,8 @@ def makeshifttable(median=False, concat=False):
                                'r2', 'i', 'Ha', 'u_c', 'g_c', 'r1_c',
                                'r2_c', 'i_c', 'Ha_c', 'Concat', 'nexp',
                                'g_s', 'r1_s', 'r2_s', 'i_2'])
-    shift_table.write(wd + 'tables/shifts_all.fits', overwrite=True)
-
-
-def spatial_map_field(field):
-
-    a2v = {'r1': 'rmag', 'r2': 'rmag', 'g': 'gmag', 'i': 'imag'}
-    ab_to_vega = {'r1': -0.136, 'r2': -0.136, 'g': 0.123, 'i': -0.373}
-    lims = {'r1': (13.5, 16.), 'r2': (13.5, 16.),
-            'g': (14, 16.), 'i': (13.5, 15.),
-            'u': (13, 20)}
-    files = glob.glob('tables/vphas_{0}-apass.fits'.format(field))
-
-    for f in files:
-        data = Table.read(f)
-        for offset in ['1', '2']:
-            it = 0
-            plt.figure(figsize=(12, 10))
-            for band in ['r1', 'r2', 'g', 'i']:
-                col = band + '_' + offset
-                er = 'err_' + col
-                mask1 = ((data[col] == data[col]) &
-                         (data[a2v[band]] == data[a2v[band]]))
-
-                mask2 = ((data[col] > lims[band][0]) &
-                         (data[col] < lims[band][1]) &
-                         (data[er] < 0.1) & (data[a2v[band]] < 99))
-                mask = mask1 & mask2
-                d = data[mask]
-                delta = (d[band + '_' + offset] -
-                         (d[a2v[band]] + ab_to_vega[band]))
-
-                mask_delta = (np.abs(delta - np.median(delta)) >
-                              (2 * np.std(delta)))
-                ax = plt.subplot(221 + it)
-                it += 1
-                if len(mask_delta[mask_delta]) != 0:
-                    a = ax.scatter(d['RA_' + offset][-mask_delta],
-                                   d['Dec_' + offset][-mask_delta],
-                                   c=delta[-mask_delta],
-                                   edgecolor='None', s=25, cmap='jet')
-                else:
-                    a = ax.scatter(d['RA_' + offset],
-                                   d['Dec_' + offset], c=delta,
-                                   edgecolor='None', s=25, cmap='jet')
-                ax.set_xlabel('RA')
-                ax.set_ylabel('DEC')
-                cb = plt.colorbar(a)
-                cb.set_label(r'$\delta {0}$'.format(band), size=18)
-                cb.solids.set_edgecolor("face")
-
-            plt.tight_layout()
-            plt.subplots_adjust(top=0.92, bottom=0.05)
-            print 'Saving...'
-            plt.suptitle(r'\underline{APASS Comparison Spatial Map}',
-                         fontsize=20)
-            plt.savefig('plots/spatial_map_{0}_{1}.png'.format(field, offset),
-                        bbox_inches='tight', rasterized=True)
-            plt.close()
+    shift_table.write(wd + 'tables/{0}/shifts_{0}_all.fits'.format(reference),
+                      overwrite=True)
 
 
 def spatial_map(band, vmin=-0.25, vmax=0.25):
@@ -1241,7 +1285,6 @@ def spatial_map(band, vmin=-0.25, vmax=0.25):
                            fontsize=24)
         ax.set_ylabel('$b$', fontsize=24)
         ax.set_xlabel('$\ell$', fontsize=24)
-        #ax.minorticks_on()
         ax.grid(linestyle='dashed', which='both', alpha=0.5)
         cb = plt.colorbar(a, pad=0.01)
         cb.set_label(r'$\delta {0}$'.format(band), size=24)
@@ -1270,13 +1313,17 @@ def table_stack(infits, outfits):
 
     os.system(command)
 
+
 def stack_apass_xmatches():
     files = glob.glob('tables/vphas_????-apass.fits')
     table_stack(files, 'vphas_apass_all.fits')
 
 
-###############################################################################
+def make_panstarrs_cat():
+    return 0
 
+
+###############################################################################
 
 if __name__ == "__main__":
     import sys
@@ -1286,13 +1333,14 @@ if __name__ == "__main__":
     print arg
 
     if args[-1] != 'apply' and args[-1] != 'makeshift' and args[-1] != 'spatial':
-        if not os.path.exists(wd + 'tables/vphas_' + arg +
-                              '-apass-shifts.npy'):
+        if not os.path.exists(wd + 'tables/{1}/vphas_{0}-{1}-shifts.npy'.format(arg, reference)):
             f = vphas_field(arg)
-            print '\nDownloading files...\n'
             ab = f.download()
             if ab != 'Missing files!':
-                f.apass_calibrate()
+                f.external_calibrate()
+                f.u_band_calibrate()
+                f.plot_cc_shifts()
+                f.spatial_map_field()
             else:
                 log = open('bin/{0}_log.txt'.format(arg), 'w')
                 log.close()
