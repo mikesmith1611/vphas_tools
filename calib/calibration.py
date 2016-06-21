@@ -1,8 +1,11 @@
 import numpy as np
+from scipy import stats
 from astropy.table import Table, vstack
 import glob
 import os
+import subprocess
 import scipy.optimize as opt
+from scipy.optimize import curve_fit
 import fnmatch
 import matplotlib as mpl
 mpl.use('Agg')
@@ -13,8 +16,10 @@ import matplotlib.path as pltpath
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 rc('text', usetex=True)
-rcParams['text.latex.preamble'] = [r"\usepackage{amsmath}", r"\usepackage{color}"]
-
+rcParams['text.latex.preamble'] = [r"\usepackage{amsmath}",
+                                   r"\usepackage{color}"]
+import warnings
+warnings.filterwarnings("ignore")
 # Change all fonts to 'Comptuer Modern'
 rc('font', **{'family': 'serif', 'serif': ['Computer Modern']})
 
@@ -25,7 +30,7 @@ field_loc = '/car-data/msmith/fields/'
 # Location of where this file is stored
 wd = '/car-data/msmith/tools/calib/'
 # STILTS installation
-stilts = 'java -jar /home/msmith/bin/topcat/topcat-*.jar -stilts'
+stilts = 'java -jar /home/msmith/bin/topcat/topcat-full.jar -stilts'
 # Location of APASS DR9 fits file
 apass_loc = '../models/apass/apass-dr9-plane-vphas.fits'
 # Location of PanSTARRS fits file
@@ -38,205 +43,6 @@ reference = 'panstarrs'
 
 reference_loc = panstarrs_loc
 
-
-def density_plot(data, cx, cy, cxshift, cyshift, ax, bins):
-    # Creates a density plot in colour colour space
-
-    mx = []
-    my = []
-
-    sp = "G0_V"
-    for i in cx:
-        i = i.split('_')[0]
-        if i == 'r2' or i == 'r1':
-            mx.append('r')
-
-        elif i == 'g':
-            mx.append('g')
-
-        elif i == 'u':
-            mx.append('u')
-
-        elif i == 'Ha':
-            mx.append('Ha')
-            sp = 'A2_V'
-        else:
-            mx.append(i)
-        # if i == 'i':
-        #     sp = 'A2_V'
-    for i in cy:
-        i = i.split('_')[0]
-        if i == 'r1' or i == 'r2':
-            my.append('r')
-            sp = "O6_V"
-
-        elif i == 'g':
-            my.append('g')
-
-        elif i == 'u':
-            my.append('u')
-
-        elif i == 'Ha':
-            my.append('Ha')
-            # sp = 'A2_V'
-        else:
-            my.append(i)
-
-    reddata = Table.read('../models/reddening/Rv_3.1.fits')
-
-    mask = (reddata['spectype'] == sp)
-    model_GOV = reddata[mask]
-
-    GOV_gr = model_GOV[mx[0]] - model_GOV[mx[1]]
-    GOV_ug = model_GOV[my[0]] - model_GOV[my[1]]
-
-    x = (data[cx[0]] - data[cx[1]]) + cxshift
-
-    y = (data[cy[0]] - data[cy[1]]) + cyshift
-
-    mask = ((x == x) & (y == y))
-
-    x = np.copy(x[mask])
-    y = np.copy(y[mask])
-
-    H, xedges, yedges = np.histogram2d(y, x, bins=bins)
-    extent = [yedges[0], yedges[-1], xedges[0], xedges[-1]]
-
-    levels = 10 ** np.linspace(0, np.log10(H.max()), 10)
-
-    norm = colors.LogNorm(vmin=levels.min(), vmax=levels.max())
-    cf = ax.contourf(H, extent=extent, levels=levels,
-                     cmap=cmaps.viridis, norm=norm)
-
-    for a in np.arange(0, 6, 1):
-        mask = (reddata['A0'] == a)
-        ZAMS = reddata[mask]
-        mask = np.argsort(ZAMS[mx[0]] - ZAMS[mx[1]])
-        ZAMS = ZAMS[mask]
-
-        ZAMS_gr = ZAMS[mx[0]] - ZAMS[mx[1]]
-        ZAMS_ug = ZAMS[my[0]] - ZAMS[my[1]]
-        ax.plot(ZAMS_gr, ZAMS_ug, color='k', linewidth=0.5, alpha=0.5)
-    ax.plot(GOV_gr, GOV_ug, color='k', linewidth=0.5, linestyle='dashdot',
-            alpha=0.8)
-
-    divider = make_axes_locatable(ax)
-    cax = divider.append_axes("top", size="5%", pad=0.05)
-    cb = plt.colorbar(cf, cax=cax, orientation="horizontal")
-
-    vals = []
-
-    for i, c in enumerate(levels):
-        if i != 0:
-            mask1 = H <= levels[i]
-            mask2 = H > levels[i - 1]
-            mask = mask1 & mask2
-        else:
-            mask = H <= levels[i]
-
-        vals.append(np.sum(H[mask]))
-
-    labels = []
-
-    for v in vals:
-        a, b = "{0:.1e}".format(v).split("e+")
-        c = r'$' + a + r'\times 10^{' + b[1] + '}$'
-        labels.append(c)
-
-    labels = ["{0}".format(int(l)) for l in levels]
-    # cbax = cb.ax.twiny()
-    cb.ax.set_xlabel("Density ($N_{Stars}/0.01$ mag$^2$)", fontsize=8,
-                     labelpad=-28)
-
-    cb.ax.tick_params(labelsize=4, which="both", pad=0.01,
-                      top='off', bottom='off',
-                      labeltop=True, labelbottom=False)
-    cb.ax.set_xticklabels(labels, fontsize=8)
-
-    return ax
-
-
-def getmodelcolours(**kwargs):
-    # Retrieves synthetic colours for VPHAS+ stars
-
-    d = {'R_V': 3.1, 'ms': False, 'A0': 0, 'spectype': 'G0_V'}
-
-    for kwarg in kwargs:
-        d[kwarg] = kwargs[kwarg]
-
-    reddata = Table.read('../models/reddening/Rv_{0}.fits'.format(d['R_V']))
-
-    if d['ms']:
-        mask = (reddata['A0'] == d['A0'])
-        ms = reddata[mask]
-        return ms
-    if not d['ms']:
-        mask = (reddata['spectype'] == d['spectype'])
-        redvector = reddata[mask]
-        return redvector
-
-###############################################################################
-
-
-def calib_polygon():
-    """
-    Creates the 'triangle' polygon needed to calibrate the 'u' band
-    """
-    G0model = getmodelcolours(spectype=['G0_V'], R_V=3.1)
-    mask = (G0model['A0'] < 2.7)
-    G0model = G0model[mask]
-
-    ZAMS = getmodelcolours(ms=True)
-    mask = np.argsort(ZAMS['g'] - ZAMS['r'])
-    ZAMS = ZAMS[mask]
-    mask = (ZAMS['g'] - ZAMS['r'] > 0.65) & (ZAMS['g'] - ZAMS['r'] < 1.437)
-    ZAMS = ZAMS[mask]
-
-    s1 = zip(G0model['g'] - G0model['r'], G0model['u'] - G0model['g'])
-    s2 = zip(ZAMS['g'] - ZAMS['r'], ZAMS['u'] - ZAMS['g'])
-
-    poly = s1 + s2[::-1]
-
-    return pltpath.Path(poly)
-
-bbPath = calib_polygon()
-
-###############################################################################
-
-
-def crossmatch(in1, in2, out, **kwargs):
-    """
-    ====================================================================
-    crossmatch - joins red and blu VPHAS+ tables using STILTS
-    ====================================================================
-    Variables
-
-    in1 - input file location table 1 (string)
-
-    in2 - input file location table 2 (string)
-
-    out - output file location (string)
-
-    **kwargs
-
-    params - cross match radius(arcsec) (default=0.5)
-
-    :param in1:
-    :param in2:
-    :param out:
-    :param kwargs:
-    """
-    d = {'params': 0.5, 'join': '1or2', 'fixcols': 'dups'}
-    for kwarg in kwargs:
-        d[kwarg] = kwargs[kwarg]
-    os.system('rm ' + out)
-    os.system(stilts + ' tmatch2 ' + 'in1=' + str(in1) + ' ' +
-              'in2=' + str(in2) +
-              ' ' + 'out=' + str(out) +
-              ' matcher=sky values1="RA DEC" values2="RA DEC" ' +
-              'params=' + str(d['params']) + ' join=' + d['join'] +
-              ' fixcols=' + d['fixcols'])
-
 ###############################################################################
 
 
@@ -245,6 +51,10 @@ class vphas_field:
 
         self.field = field
         self.a2v = {'r1': 'rmag', 'r2': 'rmag', 'g': 'gmag', 'i': 'imag'}
+        self.a2vc = {'g': [('gmag', 'rmag')],
+                     'r2': [('gmag', 'rmag'), ('rmag', 'imag')],
+                     'r1': [('rmag', 'imag'), ('gmag', 'rmag')],
+                     'i': [('rmag', 'imag')]}
         if reference == 'apass':
             self.lims = {'r1': (13.5, 16.), 'r2': (13.5, 16.),
                          'g': (14, 16.), 'i': (13.5, 15.),
@@ -392,7 +202,7 @@ class vphas_field:
 
         ax.plot(data[band], diff,
                 mfc='#888888', mec='#888888', marker='.',
-                linestyle='None')
+                linestyle='None', alpha=0.5)
 
         ax.hlines(-shift, self.lims[magstring][0], self.lims[magstring][1],
                   linestyles='dashed', zorder=4)
@@ -407,7 +217,7 @@ class vphas_field:
                       r'(VPHAS+) - ' + magstring +
                       r'({0})$'.format(reference.upper()))
 
-    def external_calibrate(self):
+    def external_calibrate(self, colour_terms=False):
 
         if self.globalcalibrate:
             s_data = Table.read('tables/shifts_{0}_all.fits'.format(reference))
@@ -425,12 +235,15 @@ class vphas_field:
 
         data = Table.read(outfile)
 
+        if len(data) == 0:
+            return False
+
         self.subplots = {'r1': (1, 0), 'r2': (1, 1), 'g': (2, 0), 'i': (2, 1),
                          'u_g_b': (0, 2), 'u_g': (0, 3), 'r_ha_b': (1, 2),
                          'r_ha': (1, 3), 'r_i_b': (2, 2), 'r_i': (2, 3)}
 
         for i in ['1', '2']:
-            self.fig = plt.figure(figsize=(16, 12))
+            plt.figure(i, figsize=(16, 12))
 
             for b in self.a2v.keys():
 
@@ -439,7 +252,18 @@ class vphas_field:
                 else:
                     d = data
 
-                delta = d[b + '_' + i] - (d[self.a2v[b]] + self.ab_to_vega[b])
+                if colour_terms:
+                    terms = np.load('bin/colour-terms-{0}.npy'.format(reference))[0]
+
+                    m, c = terms[b]
+                    vp = (d[self.a2v[b]] + c +
+                          m * (d[self.a2vc[b][0][0]] -
+                               d[self.a2vc[b][0][1]]))
+                    delta = d[b + '_' + i] - vp
+
+                else:
+                    delta = (d[b + '_' + i] -
+                             (d[self.a2v[b]] + self.ab_to_vega[b]))
 
                 mask_delta = (np.abs(delta - np.nanmedian(delta)) >
                               (2 * np.nanstd(delta)))
@@ -464,6 +288,8 @@ class vphas_field:
 
                 self.shifts[b].append(shift)
                 self.sigmas[b].append(np.nanstd(delta))
+
+        return True
 
     def u_band_calibrate(self):
         vphas_file = (field_loc + 'allfieldsxmatched/vphas_' +
@@ -554,6 +380,7 @@ class vphas_field:
         vdata = Table.read(vphas_file)
 
         for i in ['1', '2']:
+            fig = plt.figure(i)
             ub = 'u' + '_' + i
             mask1 = vdata['err_' + ub] < 0.1
             mask2 = vdata[ub] > self.lims['u'][0]
@@ -624,6 +451,11 @@ class vphas_field:
                 ax.set_xlabel(r'$r-i$', fontsize=16)
                 ax.set_ylabel(r'$r-ha$', fontsize=16)
 
+            mask1 = vdata['err_g_' + i] < 0.1
+            mask2 = vdata['g_' + i] > 13.
+            mask3 = vdata['g_' + i] < 20.
+            vdatag = vdata[mask1 & mask2 & mask3]
+
             for k in ['r_i_b', 'r_i']:
                 ax = plt.subplot2grid((3, 4), self.subplots[k])
 
@@ -640,7 +472,7 @@ class vphas_field:
                 binsx = np.arange(min(xlims), max(xlims) + 0.01, 0.01)
                 binsy = np.arange(min(ylims), max(ylims) + 0.01, 0.01)
 
-                ax = density_plot(vdatau,
+                ax = density_plot(vdatag,
                                   ['r1_' + i, 'i_' + i],
                                   ['g_' + i, 'r2_' + i],
                                   s1, s2, ax, [binsy, binsx])
@@ -659,7 +491,6 @@ class vphas_field:
             ax = plt.subplot2grid((3, 4), (0, 0), colspan=2)
             ytable = ax.table(cellText=[txt], colLabels=cols,
                               loc='center', cellLoc='center', fontsize=20)
-
             ytable.scale(1, 4)
             ax.xaxis.set_visible(False)
             ax.yaxis.set_visible(False)
@@ -667,12 +498,12 @@ class vphas_field:
             plt.subplots_adjust(top=0.92, bottom=0.05)
             ax.text(0.45, 0.8, r'\underline{Shifts}',
                     ha='center', va='center', fontsize=20)
-            self.fig.text(0.25, 0.65, r'\underline{APASS Comparsion}',
-                          ha='center', va='center', fontsize=20)
-            self.fig.text(0.65, 0.97, r'\underline{Before Calibration}',
-                          ha='center', va='center', fontsize=20)
-            self.fig.text(0.89, 0.97, r'\underline{After Calibration}',
-                          ha='center', va='center', fontsize=20)
+            fig.text(0.25, 0.65, r'\underline{APASS Comparsion}',
+                     ha='center', va='center', fontsize=20)
+            fig.text(0.65, 0.97, r'\underline{Before Calibration}',
+                     ha='center', va='center', fontsize=20)
+            fig.text(0.89, 0.97, r'\underline{After Calibration}',
+                     ha='center', va='center', fontsize=20)
 
             figname = (wd + 'plots/{0}/vphas_' + self.field + '_' + i +
                        '_{0}.png')
@@ -726,7 +557,6 @@ class vphas_field:
 
             plt.tight_layout()
             plt.subplots_adjust(top=0.92, bottom=0.05)
-            print 'Saving...'
             plt.suptitle(r'\underline{' + reference.upper() +
                          'Comparison Spatial Map}',
                          fontsize=20)
@@ -765,18 +595,18 @@ class vphas_field:
         bands = ['Ha', 'r1', 'r2', 'g', 'i', 'u']
 
         shifts = Table.read(wd +
-                            'tables/shifts_all_{0}.fits'.format(reference))
+                            'tables/shifts_master.fits')
 
         for band in bands:
 
             for o in ['1', '2']:
                 mask = (shifts['field'] == self.field + '_' + o)
-                shift = shifts[mask][band + '_c'][0]
+                shift = shifts[mask][band][0]
                 data[band + '_' + o] = data[band + '_' + o] + shift
 
             if band == 'Ha':
                 mask = (shifts['field'] == self.field + '_2')
-                shift = shifts[mask][band + '_c'][0]
+                shift = shifts[mask][band][0]
                 data[band + '_3'] = data[band + '_3'] + shift
 
         data.write(field_loc + 'allsortedfields/vphas_' +
@@ -785,6 +615,219 @@ class vphas_field:
 
         # os.system('rm ' + field_loc + 'allfieldsxmatched/vphas_' +
         #           self.field + '.fits')
+
+###############################################################################
+
+
+def density_plot(data, cx, cy, cxshift, cyshift, ax, bins):
+    # Creates a density plot in colour colour space
+
+    mx = []
+    my = []
+
+    sp = "G0_V"
+    rv = 3.1
+    for i in cx:
+        i = i.split('_')[0]
+        if i == 'r2' or i == 'r1':
+            mx.append('r')
+
+        elif i == 'g':
+            mx.append('g')
+
+        elif i == 'u':
+            mx.append('u')
+
+        elif i == 'Ha':
+            mx.append('Ha')
+            sp = 'A2_V'
+        else:
+            mx.append(i)
+        # if i == 'i':
+        #     sp = 'A2_V'
+    for i in cy:
+        i = i.split('_')[0]
+        if i == 'r1' or i == 'r2':
+            my.append('r')
+            sp = "O6_V"
+            rv = 3.1
+
+        elif i == 'g':
+            my.append('g')
+
+        elif i == 'u':
+            my.append('u')
+
+        elif i == 'Ha':
+            my.append('Ha')
+            sp = 'A2_V'
+        else:
+            my.append(i)
+
+    reddata = Table.read('../models/reddening/Rv_{0}.fits'.format(rv))
+
+    mask = (reddata['spectype'] == sp)
+    model_GOV = reddata[mask]
+
+    GOV_gr = model_GOV[mx[0]] - model_GOV[mx[1]]
+    GOV_ug = model_GOV[my[0]] - model_GOV[my[1]]
+
+    x = (data[cx[0]] - data[cx[1]]) + cxshift
+
+    y = (data[cy[0]] - data[cy[1]]) + cyshift
+
+    mask = ((x == x) & (y == y))
+
+    x = np.copy(x[mask])
+    y = np.copy(y[mask])
+
+    H, xedges, yedges = np.histogram2d(y, x, bins=bins)
+    extent = [yedges[0], yedges[-1], xedges[0], xedges[-1]]
+
+    levels = 10 ** np.linspace(0, np.log10(H.max()), 10)
+
+    norm = colors.LogNorm(vmin=levels.min(), vmax=levels.max())
+    cf = ax.contourf(H, extent=extent, levels=levels,
+                     cmap=cmaps.viridis, norm=norm)
+
+    for a in np.arange(0, 6, 1):
+        mask = (reddata['A0'] == a)
+        ZAMS = reddata[mask]
+        mask = np.argsort(ZAMS[mx[0]] - ZAMS[mx[1]])
+        ZAMS = ZAMS[mask]
+
+        ZAMS_gr = ZAMS[mx[0]] - ZAMS[mx[1]]
+        ZAMS_ug = ZAMS[my[0]] - ZAMS[my[1]]
+        ax.plot(ZAMS_gr, ZAMS_ug, color='k', linewidth=0.5, alpha=0.5)
+    ax.plot(GOV_gr, GOV_ug, color='k', linewidth=0.5, linestyle='dashdot',
+            alpha=0.8)
+
+    divider = make_axes_locatable(ax)
+    cax = divider.append_axes("top", size="5%", pad=0.05)
+    cb = plt.colorbar(cf, cax=cax, orientation="horizontal")
+
+    vals = []
+
+    for i, c in enumerate(levels):
+        if i != 0:
+            mask1 = H <= levels[i]
+            mask2 = H > levels[i - 1]
+            mask = mask1 & mask2
+        else:
+            mask = H <= levels[i]
+
+        vals.append(np.sum(H[mask]))
+
+    labels = []
+
+    for v in vals:
+        a, b = "{0:.1e}".format(v).split("e+")
+        c = r'$' + a + r'\times 10^{' + b[1] + '}$'
+        labels.append(c)
+
+    labels = ["{0}".format(int(l)) for l in levels]
+    # cbax = cb.ax.twiny()
+    cb.ax.set_xlabel("Density ($N_{Stars}/0.01$ mag$^2$)", fontsize=8,
+                     labelpad=-28)
+
+    cb.ax.tick_params(labelsize=4, which="both", pad=0.01,
+                      top='off', bottom='off',
+                      labeltop=True, labelbottom=False)
+    cb.ax.set_xticklabels(labels, fontsize=8)
+
+    return ax
+
+
+def getmodelcolours(**kwargs):
+    # Retrieves synthetic colours for VPHAS+ stars
+
+    d = {'R_V': 3.1, 'ms': False, 'A0': 0, 'spectype': 'G0_V'}
+
+    for kwarg in kwargs:
+        d[kwarg] = kwargs[kwarg]
+
+    reddata = Table.read('../models/reddening/Rv_{0}.fits'.format(d['R_V']))
+
+    if d['ms']:
+        mask = (reddata['A0'] == d['A0'])
+        ms = reddata[mask]
+        return ms
+    if not d['ms']:
+        mask = (reddata['spectype'] == d['spectype'])
+        redvector = reddata[mask]
+        return redvector
+
+###############################################################################
+
+
+def calib_polygon():
+    """
+    Creates the 'triangle' polygon needed to calibrate the 'u' band
+    """
+    G0model = getmodelcolours(spectype=['G0_V'], R_V=3.1)
+    mask = (G0model['A0'] < 2.7)
+    G0model = G0model[mask]
+
+    ZAMS = getmodelcolours(ms=True)
+    mask = np.argsort(ZAMS['g'] - ZAMS['r'])
+    ZAMS = ZAMS[mask]
+    mask = (ZAMS['g'] - ZAMS['r'] > 0.65) & (ZAMS['g'] - ZAMS['r'] < 1.437)
+    ZAMS = ZAMS[mask]
+
+    s1 = zip(G0model['g'] - G0model['r'], G0model['u'] - G0model['g'])
+    s2 = zip(ZAMS['g'] - ZAMS['r'], ZAMS['u'] - ZAMS['g'])
+
+    poly = s1 + s2[::-1]
+
+    return pltpath.Path(poly)
+
+bbPath = calib_polygon()
+
+###############################################################################
+
+
+def crossmatch(in1, in2, out, **kwargs):
+    """
+    ====================================================================
+    crossmatch - joins red and blu VPHAS+ tables using STILTS
+    ====================================================================
+    Variables
+
+    in1 - input file location table 1 (string)
+
+    in2 - input file location table 2 (string)
+
+    out - output file location (string)
+
+    **kwargs
+
+    params - cross match radius(arcsec) (default=0.5)
+
+    :param in1:
+    :param in2:
+    :param out:
+    :param kwargs:
+    """
+    d = {'params': 0.5, 'join': '1or2', 'fixcols': 'dups'}
+    for kwarg in kwargs:
+        d[kwarg] = kwargs[kwarg]
+    subprocess.call(['rm', out])
+    st = stilts.split(' ')
+    FNULL = open(os.devnull, 'w')
+    subprocess.call(st + ['tmatch2', 'in1={0}'.format(in1),
+                          'in2={0}'.format(in2), 'out={0}'.format(out),
+                          'matcher=sky', 'values1=RA DEC', 'values2=RA DEC',
+                          'params={0}'.format(d['params']),
+                          'join={0}'.format(d['join']),
+                          'fixcols={0}'.format(d['fixcols'])], stdout=FNULL)
+    """
+    os.system(stilts + ' tmatch2 ' + 'in1=' + str(in1) + ' ' +
+              'in2=' + str(in2) +
+              ' ' + 'out=' + str(out) +
+              ' matcher=sky values1="RA DEC" values2="RA DEC" ' +
+              'params=' + str(d['params']) + ' join=' + d['join'] +
+              ' fixcols=' + d['fixcols'])
+    """
 
 ###############################################################################
 
@@ -810,11 +853,13 @@ def calib_polygon2(cx, cy):
 
     return pltpath.Path(poly)
 
+###############################################################################
+
 
 def cc_plots(field):
 
     datain = Table.read('fields/vphas_{0}.fits'.format(field))
-    shiftsa = Table.read('tables/shifts_all.fits')
+    shiftsa = Table.read('tables/shifts_master.fits')
     cx = [('g', 'r2'), ('r1', 'i'), ('r1', 'i')]
     cy = [('u', 'g'), ('r1', 'Ha'), ('g', 'r2')]
     xlims = [(0., 2.0), (-0.25, 2.25), (-0.25, 2.0)]
@@ -840,10 +885,10 @@ def cc_plots(field):
             binsx = np.arange(min(xlims[i]), max(xlims[i]) + 0.01, 0.01)
             binsy = np.arange(min(ylims[i]), max(ylims[i]) + 0.01, 0.01)
             ax1 = density_plot(data, cx2, cy2,
-                               -float(shifts[cx[i][0] + '_c'] -
-                                      shifts[cx[i][1] + '_c']),
-                               -float(shifts[cy[i][0] + '_c'] -
-                                      shifts[cy[i][1] + '_c']),
+                               -float(shifts[cx[i][0]] -
+                                      shifts[cx[i][1]]),
+                               -float(shifts[cy[i][0]] -
+                                      shifts[cy[i][1]]),
                                ax1, [binsy, binsx])
             ax1.set_xlabel('{0} - {1}'.format(cx[i][0], cx[i][1]))
             ax1.set_ylabel('{0} - {1}'.format(cy[i][0], cy[i][1]))
@@ -868,9 +913,10 @@ def cc_plots(field):
                 ax2.add_artist(p)
 
         plt.tight_layout()
-        plt.savefig('plots/vphas_{0}_{1}_concat_calib.png'.format(field, j),
+        plt.savefig('plots/combined/vphas_{0}_{1}_concat_calib.png'.format(field, j),
                     bbox_inches='tight')
 
+###############################################################################
 
 def make_before_after_calib():
 
@@ -900,6 +946,8 @@ def make_before_after_calib():
 
     t_b.write('outdata/carina/tables/carina_before_calib.fits')
     t_a.write('outdata/carina/tables/carina_after_calib.fits')
+
+###############################################################################
 
 
 def cc_plots_all():
@@ -957,7 +1005,8 @@ def cc_plots_all():
 
 def merge(infile, outfile, conf_max=95):
     """
-
+    Creates a single Ha column by taking averages across offset fields,
+    depending on the confidence and photometric errors in each offset.
     :param infile:
     :param outfile:
     :param conf_max:
@@ -1118,6 +1167,54 @@ def sort(infile, outfile):
 ###############################################################################
 
 
+def combine_apass_panstarrs():
+
+    apass = Table.read('tables/apass/shifts_apass_all.fits')
+    panstarrs = Table.read('tables/panstarrs/shifts_panstarrs_all.fits')
+    concats = np.unique(list(apass['Concat']) + list(panstarrs['Concat']))
+    bands = {'u': [], 'g': [], 'r1': [], 'r2': [], 'i': [], 'Ha': []}
+    fields = []
+    ext = []
+    for c in concats:
+        mask1 = apass['Concat'] == c
+        mask2 = panstarrs['Concat'] == c
+
+        if len(mask1[mask1]) == len(mask2[mask2]):
+            fields += list(panstarrs['field'][mask2])
+            for b in bands.keys():
+                shift = np.nanmedian(panstarrs[b][mask2])
+                bands[b] += [shift] * len(mask2[mask2])
+            ext += ['panstarrs'] * len(mask2[mask2])
+
+        elif len(mask2[mask2]) == 0:
+            fields += list(apass['field'][mask1])
+            for b in bands.keys():
+                shift = np.nanmedian(apass[b][mask1])
+                bands[b] += [shift] * len(mask1[mask1])
+            ext += ['apass'] * len(mask1[mask1])
+
+        elif len(mask1[mask1]) == 0:
+            fields += list(panstarrs['field'][mask2])
+            for b in bands.keys():
+                shift = np.nanmedian(panstarrs[b][mask2])
+                bands[b] += [shift] * len(mask2[mask2])
+            ext += ['panstarrs'] * len(mask2[mask2])
+        else:
+            f = list(np.unique(list(apass['field'][mask1]) +
+                               list(panstarrs['field'][mask2])))
+            fields += f
+            for b in bands.keys():
+                shifts = panstarrs[b][mask2]
+                shifts = shifts[abs(shifts) < 1.0]
+                shift = np.nanmedian(shifts)
+                bands[b] += [shift] * len(f)
+            ext += ['both'] * len(f)
+
+    bands['field'] = fields
+    bands['ext'] = ext
+    t = Table(bands)
+    t.write('tables/shifts_master.fits', overwrite=True)
+
 def makeshifttable(median=False, concat=False):
     print '\nCompiling Shift Table...\n'
     files = glob.glob(wd + 'tables/{0}/*shifts.npy'.format(reference))
@@ -1231,23 +1328,33 @@ def makeshifttable(median=False, concat=False):
                         names=['field', 'GAL_LONG', 'GAL_LAT', 'u', 'g', 'r1',
                                'r2', 'i', 'Ha', 'u_c', 'g_c', 'r1_c',
                                'r2_c', 'i_c', 'Ha_c', 'Concat', 'nexp',
-                               'g_s', 'r1_s', 'r2_s', 'i_2'])
+                               'g_s', 'r1_s', 'r2_s', 'i_s'])
     shift_table.write(wd + 'tables/{0}/shifts_{0}_all.fits'.format(reference),
                       overwrite=True)
 
+###############################################################################
 
-def spatial_map(band, vmin=-0.25, vmax=0.25):
 
+def spatial_map(band, offset='1', vmin=-0.25, vmax=0.25, mod=False):
+
+    a2vc = {'g': [('gmag', 'rmag')],
+            'r2': [('gmag', 'rmag'), ('rmag', 'imag')],
+            'r1': [('rmag', 'imag'), ('gmag', 'rmag')],
+            'i': [('rmag', 'imag')]}
     a2v = {'r1': 'rmag', 'r2': 'rmag', 'g': 'gmag', 'i': 'imag'}
     ab_to_vega = {'r1': -0.136, 'r2': -0.136, 'g': 0.123, 'i': -0.373}
-    lims = {'r1': (13.5, 16.), 'r2': (13.5, 16.),
-            'g': (14, 16.), 'i': (13.5, 15.),
-            'u': (13, 20)}
-    offset = '2'
+    if reference == 'apass':
+        lims = {'r1': (13.5, 16.), 'r2': (13.5, 16.),
+                'g': (14, 16.), 'i': (13.5, 15.),
+                'u': (13, 20)}
+    elif reference == 'panstarrs':
+        lims = {'r1': (16.5, 19.), 'r2': (16.5, 19.5),
+                'g': (17.5, 20.5), 'i': (15.5, 18.5),
+                'u': (13, 20)}
 
-    data = Table.read('vphas_apass_all.fits')
-    mask = (data['l'] > 0) & (data['l'] < 60)
-    data['l'][mask] = data['l'][mask] + 360.
+    data = Table.read('bin/vphas_{0}_all.fits'.format(reference))
+    mask = (data['GAL_LONG'] > 0) & (data['GAL_LONG'] < 60)
+    data['GAL_LONG'][mask] = data['GAL_LONG'][mask] + 360.
     col = band + '_' + offset
     er = 'err_' + col
 
@@ -1257,16 +1364,33 @@ def spatial_map(band, vmin=-0.25, vmax=0.25):
              (data[er] < 0.1) & (data[a2v[band]] < 99))
     mask = mask1 & mask2
     d = data[mask]
-    delta = d[band + '_' + offset] - (d[a2v[band]] + ab_to_vega[band])
+
+    terms = np.load('bin/colour-terms-{0}.npy'.format(reference))[0]
+
+    m, c = terms[band]
+    vp = (d[a2v[band]] + c +
+          m * (d[a2vc[band][0][0]] -
+               d[a2vc[band][0][1]]))
+    delta = d[band + '_' + offset] - vp
+
     plt.figure(figsize=(20, 20))
     lranges = [(400, 352.5), (352.5, 300.5), (300.5, 253,), (253, 205.5)]
     for it, lr in enumerate(lranges):
-        mask = (d['l'] < lr[0]) & (d['l'] > lr[1])
+        mask = (d['GAL_LONG'] < lr[0]) & (d['GAL_LONG'] > lr[1])
 
         ax = plt.subplot(411 + it)
-        a = ax.scatter(d['l'][mask], d['b'][mask], c=delta[mask],
-                       edgecolor='None', s=2, vmin=vmin, vmax=vmax,
-                       cmap='jet')
+
+        if len(mask[mask]) != 0:
+            if mod:
+                print 'mod'
+                c = abs(delta[mask])
+                vmin = 0
+            else:
+                c = delta[mask]
+            a = ax.scatter(d['GAL_LONG'][mask], d['GAL_LAT'][mask],
+                           c=c,
+                           edgecolor='None', s=2, vmin=vmin, vmax=vmax,
+                           cmap='jet')
         ax.set_xlim(lr[0], lr[1])
 
         ax.set_xticks(np.arange(lr[0], lr[1], -20))
@@ -1289,10 +1413,17 @@ def spatial_map(band, vmin=-0.25, vmax=0.25):
         cb = plt.colorbar(a, pad=0.01)
         cb.set_label(r'$\delta {0}$'.format(band), size=24)
         cb.ax.tick_params(labelsize=20)
+    if mod:
+        suffix = ''
+    else:
+        suffix = '_alt'
     print 'Saving..'
-    plt.savefig('spatial_map_{0}_{1}_alt.png'.format(band, offset),
+    plt.savefig('spatial_map_{0}_{1}_{2}{3}.png'.format(band, offset,
+                                                        reference, suffix),
                 bbox_inches='tight', rasterized=True, dpi=200)
     plt.close()
+
+###############################################################################
 
 
 def table_stack(infits, outfits):
@@ -1313,15 +1444,76 @@ def table_stack(infits, outfits):
 
     os.system(command)
 
-
-def stack_apass_xmatches():
-    files = glob.glob('tables/vphas_????-apass.fits')
-    table_stack(files, 'vphas_apass_all.fits')
+###############################################################################
 
 
-def make_panstarrs_cat():
-    return 0
+def stack_reference_xmatches():
+    files = glob.glob('tables/{0}/vphas_????-{0}.fits'.format(reference))
+    table_stack(files, 'bin/vphas_{0}_all.fits'.format(reference))
 
+###############################################################################
+
+def get_colour_terms():
+    """
+    Perform a linear regression fit on the VPHAS - APASS for all fields.
+    This will give colour terms saved in a file bin/colour-terms.npy
+    """
+    terms = {'g': ('gmag', 'rmag'),
+             'r2': ('rmag', 'imag'),
+             'r1': ('rmag', 'imag'),
+             'i': ('rmag', 'imag')}
+    a2v = {'r1': 'rmag', 'r2': 'rmag', 'g': 'gmag', 'i': 'imag'}
+    data = Table.read('bin/vphas_{0}_all_orig.fits'.format(reference))
+    for t in terms.keys():
+        y = data[t + '_1'] - data[a2v[t]]
+        x = data[terms[t][0]] - data[terms[t][1]]
+        mask = (x == x) & (y == y) 
+        x = x[mask]
+        y = y[mask]
+        slope, intercept, r, p, std_err = stats.linregress(x, y)
+        terms[t] = (slope, intercept)
+    np.save('bin/colour-terms-{0}'.format(reference), np.array([terms]))
+
+###############################################################################
+
+def get_multi_colour_terms():
+    a2v = {'r1': 'rmag', 'r2': 'rmag', 'g': 'gmag', 'i': 'imag'}
+    def fn(x, a, b, c):
+        return a * x[0] + b * x[1] + c
+    def fn2(x, a, b):
+        return a * x + b
+    data_in = Table.read('bin/vphas_{0}_all_orig.fits'.format(reference))
+
+    mask1 = (data_in['l'] > 200) & (data_in['l'] < 270)
+    mask2 = (data_in['l'] < 50.) | (data_in['l'] > 350.)
+    masks = [mask1, mask2]
+    for i, m in enumerate(masks):
+        data = data_in[m]
+        terms = {'g': [('gmag', 'rmag')],
+                 'r2': [('gmag', 'rmag'), ('rmag', 'imag')],
+                 'r1': [('rmag', 'imag'), ('gmag', 'rmag')],
+                 'i': [('rmag', 'imag')]}
+        for t in terms.keys():
+
+            y = data[t + '_1'] - data[a2v[t]]
+            x = data[terms[t][0][0]] - data[terms[t][0][1]]
+            if t.startswith('r'):
+                z = data[terms[t][1][0]] - data[terms[t][1][1]]
+                mask = (x == x) & (y == y) & (z == z)
+                x = x[mask]
+                z = z[mask]
+                y = y[mask]
+                v = [x, z]
+                popt, pcov = curve_fit(fn, v, y)
+                terms[t] = popt
+            else:
+                mask = (x == x) & (y == y)
+                x = x[mask]
+                y = y[mask]
+                popt, pcov = curve_fit(fn2, x, y)
+                terms[t] = popt
+        np.save('bin/colour-terms-{0}-{1}'.format(reference, i),
+                                                  np.array([terms]))
 
 ###############################################################################
 
@@ -1329,36 +1521,53 @@ if __name__ == "__main__":
     import sys
     os.chdir('/car-data/msmith/tools/calib/')
     args = sys.argv
-    arg = args[1]
-    print arg
+    #arg = args[1]
+    #print 'Field {0}'.format(arg)
+    d = {'field': None, 'apply': False, 'makeshift': False}
 
-    if args[-1] != 'apply' and args[-1] != 'makeshift' and args[-1] != 'spatial':
-        if not os.path.exists(wd + 'tables/{1}/vphas_{0}-{1}-shifts.npy'.format(arg, reference)):
-            f = vphas_field(arg)
+    for arg in args[1:]:
+        a, b = arg.split('=')
+        if a not in d.keys():
+            print '{0} not a valid argument!'.format(a)
+            sys.exit()
+        else:
+            if a == 'apply':
+                b = True
+            d[a] = b
+
+    if not d['apply'] and not d['makeshift']:
+        cal_file = 'tables/{1}/vphas_{0}-{1}-shifts.npy'.format(d['field'],
+                                                                reference)
+        if not os.path.exists(cal_file):
+            f = vphas_field(d['field'])
             ab = f.download()
             if ab != 'Missing files!':
-                f.external_calibrate()
-                f.u_band_calibrate()
-                f.plot_cc_shifts()
-                f.spatial_map_field()
+                print 'Calibrating against {0}...'.format(reference.upper())
+                a = f.external_calibrate(colour_terms=True)
+                if a:
+                    print 'Calibrating u band...'
+                    f.u_band_calibrate()
+                    print 'Making plots...'
+                    f.plot_cc_shifts()
+                    f.spatial_map_field()
+                    print 'Done'
+                else:
+                    print 'No overlap with {0}'.format(reference.upper())
             else:
                 log = open('bin/{0}_log.txt'.format(arg), 'w')
                 log.close()
         else:
             print 'Already Done!'
 
-    elif args[-1] == 'apply':
-        if not os.path.exists(wd + 'fields/vphas_' + arg + '.fits'):
-            f = vphas_field(arg)
+    elif d['apply']:
+        if not os.path.exists(wd + 'fields/vphas_' + d['field'] + '.fits'):
+            f = vphas_field(d['field'])
             print 'Applying Shifts...\n'
             f.aply_shifts()
             print 'Merging offsets...\n'
             f.sort()
+        else:
+            print 'Already Done!'
 
-    elif args[-1] == 'spatial':
-        spatial_map_field(arg)
-    else:
-        print 'Already Done!'
-
-    if args[-1] == 'makeshift':
+    elif d['makeshift']:
         makeshifttable()

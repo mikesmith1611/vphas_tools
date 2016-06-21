@@ -10,7 +10,8 @@ Calculates shifts for individual pointings
 
 
 def calibrate(field):
-    os.system('python /car-data/msmith/tools/calib/calibration.py ' + field + ' spatial')
+    cmd = 'python /car-data/msmith/tools/calib/calibration.py field={0} apply=True'
+    os.system(cmd.format(field))
 
 data = Table.read('bin/vphas_pos_status.fits')
 
@@ -75,9 +76,8 @@ def check_done_concats():
     bad = [badIDs, badFields, goodFields]
     return bad
 
-"""
 mycluster = "/home/msmith/.ipython/profile_mpi/security/ipcontroller" \
-            "-sedmcmc-client.json"
+            "-client.json"
 
 c = Client(mycluster)
 v = c[:]
@@ -89,4 +89,3 @@ with v.sync_imports():
 
 print "Calibrating..."
 sim1 = v.map(calibrate, fields_s, block=True)
-"""

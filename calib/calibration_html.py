@@ -2,7 +2,7 @@ import numpy as np
 from astropy.table import Table
 import os
 
-reference = 'apass'
+reference = 'panstarrs'
 
 def create_template_html():
     html_str = """
@@ -19,6 +19,7 @@ def create_template_html():
 
 <h1> VPHAS+ calibration shifts</h1>
 <a href="tools/calib/tables/apass/shifts_apass_all.fits">Full Table (fits)</a> &nbsp;&nbsp;&nbsp;&nbsp;
+<a href="tools/calib/plots/">All plots</a> &nbsp;&nbsp;&nbsp;&nbsp;
 
 <br> <br>
 
